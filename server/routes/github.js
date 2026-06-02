@@ -162,15 +162,21 @@ const computeProductivityFromEvents = (events, login) => {
     ? parseFloat((totalWeekCommits / Object.keys(weekMap).length).toFixed(1))
     : 0;
 
+
+    // Build weeklyCommits array for consistency score
+  const weeklyCommits = Object.entries(weekMap)
+    .map(([weekKey, commits]) => ({ week: weekKey, commits }))
+    .sort((a, b) => a.week.localeCompare(b.week)); // sort chronological
+
   const maxDay = Math.max(...dayTotals, 0);
   const mostProductiveDay = maxDay > 0 ? dayNames[dayTotals.indexOf(maxDay)] : 'N/A';
   const streakRate = longestStreak > 0 ? Math.round((currentStreak / longestStreak) * 100) : 0;
 
   const dayChart = dayNames.map((name, i) => ({
     day: name.slice(0, 3),
-    commits: dayTotals[i],
+    commits: dayTotals[i], 
   }));
-
+ 
   return {
     mostProductiveDay,
     avgCommitsPerWeek,
@@ -180,6 +186,7 @@ const computeProductivityFromEvents = (events, login) => {
     dayChart,
     totalCommits,
     monthMap,
+    weeklyCommits,   // <-- add this line
   };
 };
 
