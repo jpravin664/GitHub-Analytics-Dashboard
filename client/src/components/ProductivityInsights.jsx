@@ -36,7 +36,18 @@ export default function ProductivityInsights({ productivity, stats }) {
 
   const totalCommits = stats?.totalLifetimeCommits || productivity.totalCommits || 0;
   const maxCommits = dayChart.length ? Math.max(...dayChart.map(d => d.commits)) : 0;
-  const shortDay = mostProductiveDay?.slice(0, 3) || '—';
+  
+  // FIX #4: Use full day name for display, and correct pluralization
+  const getFullDayName = (shortDay) => {
+    const daysMap = {
+      'Sun': 'Sunday', 'Mon': 'Monday', 'Tue': 'Tuesday', 'Wed': 'Wednesday',
+      'Thu': 'Thursday', 'Fri': 'Friday', 'Sat': 'Saturday'
+    };
+    return daysMap[shortDay] || shortDay;
+  };
+  const fullDayName = mostProductiveDay ? getFullDayName(mostProductiveDay) : '—';
+  // For the pluralized version: "Mondays" (add 's' only if not already ending with 's' or 'y'? We'll keep it simple)
+  const displayDayText = mostProductiveDay ? `${fullDayName}${fullDayName !== '—' ? 's' : ''}` : '—';
 
   // Weekend vs Weekday
   const weekendDays = ['Sat', 'Sun'];
@@ -73,7 +84,7 @@ export default function ProductivityInsights({ productivity, stats }) {
 
       {/* Stat pills */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-5">
-        <StatPill icon="🏆" label="Most Active Day" value={shortDay} color="border-gh-green/30" />
+        <StatPill icon="🏆" label="Most Active Day" value={displayDayText} color="border-gh-green/30" />
         <StatPill icon="📅" label="Avg / Week" value={avgCommitsPerWeek} color="border-gh-accent/30" />
         <StatPill icon="🔥" label="Current Streak" value={`${currentStreak}d`} color="border-gh-orange/30" />
         <StatPill icon="🎯" label="Longest Streak" value={`${longestStreak}d`} color="border-gh-purple/30" />
@@ -96,7 +107,7 @@ export default function ProductivityInsights({ productivity, stats }) {
         </div>
       )}
 
-      {/* Two-column layout: chart (left) + boxes (right) */}
+      {/* Two-column layout */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Left: Commit patterns chart */}
         <div>
@@ -179,10 +190,10 @@ export default function ProductivityInsights({ productivity, stats }) {
         </div>
       </div>
 
-      {/* Most productive day callout (still below) */}
+      {/* Most productive day callout - now uses full day name correctly */}
       {mostProductiveDay && (
         <div className="mt-4 px-3 py-2 rounded-lg bg-gh-dark border border-gh-orange/20 text-xs text-gh-muted">
-          🌟 You commit most on <span className="text-gh-orange font-semibold">{shortDay}s</span>
+          🌟 You commit most on <span className="text-gh-orange font-semibold">{displayDayText}</span>
           {avgCommitsPerWeek > 0 && <> — averaging <span className="text-gh-green font-semibold">{avgCommitsPerWeek} commits/week</span></>}
         </div>
       )}

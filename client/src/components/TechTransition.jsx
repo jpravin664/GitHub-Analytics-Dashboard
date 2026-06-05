@@ -14,7 +14,7 @@ const LANG_COLORS = {
 const getLangColor = (lang) => LANG_COLORS[lang] || LANG_COLORS.default;
 
 const Arrow = () => (
-  <div className="flex flex-col items-center justify-center px-1 text-gh-muted">
+  <div className="flex flex-col items-center justify-center px-1 text-gh-muted self-center">
     <div className="text-xl">→</div>
   </div>
 );
@@ -48,9 +48,11 @@ export default function TechTransition({ techTransition }) {
         {techTransition.map((yearData, i) => {
           const isHovered = hoveredYear === yearData.year;
           const isLast    = i === techTransition.length - 1;
-          const barHeight = maxRepos > minRepos
-            ? 30 + ((yearData.totalRepos - minRepos) / (maxRepos - minRepos)) * 40
-            : 50;
+          
+          // FIX #2: Prevent division by zero when maxRepos === 0
+          const barWidthPercent = maxRepos === 0 
+            ? 0 
+            : (yearData.totalRepos / maxRepos) * 100;
 
           return (
             <React.Fragment key={yearData.year}>
@@ -81,15 +83,15 @@ export default function TechTransition({ techTransition }) {
                     <div
                       className="h-1.5 rounded-full transition-all duration-500"
                       style={{
-                        width: `${(yearData.totalRepos / maxRepos) * 100}%`,
+                        width: `${barWidthPercent}%`,
                         backgroundColor: getLangColor(yearData.topLang)
                       }}
                     />
                   </div>
                   <div className="text-gh-muted text-xs mt-1">{yearData.totalRepos} repo{yearData.totalRepos !== 1 ? 's' : ''}</div>
 
-                  {/* Expanded detail on hover */}
-                  {isHovered && yearData.topLangs.length > 1 && (
+                  {/* Expanded detail on hover - FIX #1: optional chaining */}
+                  {isHovered && yearData.topLangs?.length > 1 && (
                     <div className="mt-2 w-full space-y-1">
                       {yearData.topLangs.slice(1).map(({ lang, count }) => (
                         <div key={lang} className="flex items-center gap-1.5">
@@ -103,7 +105,7 @@ export default function TechTransition({ techTransition }) {
                 </div>
               </div>
 
-              {/* Arrow between years */}
+              {/* Arrow between years - now vertically centered */}
               {!isLast && <Arrow />}
             </React.Fragment>
           );

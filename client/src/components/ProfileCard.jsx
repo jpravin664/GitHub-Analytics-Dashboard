@@ -4,7 +4,12 @@ export default function ProfileCard({ profile }) {
   if (!profile) return null;
   const { avatar_url, name, login, bio, followers, following, public_repos, html_url, created_at } = profile;
 
-  const joinYear = new Date(created_at).getFullYear();
+  // FIX #3: Guard against invalid or missing created_at
+  let joinYear = '?';
+  if (created_at) {
+    const year = new Date(created_at).getFullYear();
+    if (!isNaN(year)) joinYear = year;
+  }
 
   return (
     <div className="bg-gh-card border border-gh-border rounded-xl p-5 flex flex-col gap-4">
@@ -13,6 +18,7 @@ export default function ProfileCard({ profile }) {
           src={avatar_url}
           alt={name || login}
           className="w-16 h-16 rounded-full border-2 border-gh-border flex-shrink-0"
+          onError={(e) => e.target.src = 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png'}
         />
         <div className="min-w-0">
           <h2 className="text-gh-text font-semibold text-lg leading-tight truncate">{name || login}</h2>
