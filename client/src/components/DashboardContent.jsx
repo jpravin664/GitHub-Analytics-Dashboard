@@ -6,7 +6,7 @@ import RepoChart from './RepoChart';
 import CommitChart from './CommitChart';
 import OpenSourceSection from './OpenSourceSection';
 import ProductivityInsights from './ProductivityInsights';
-// import CommitStreak from './CommitStreak';
+import CommitStreak from './CommitStreak'; // FIX #4: Was accidentally commented out.
 import StarsOverTime from './StarsOverTime';
 import TechTransition from './TechTransition';
 
@@ -39,10 +39,17 @@ export default function DashboardContent({ data }) {
         </div>
       </div>
 
-      {/* Row 3 – Productivity Insights — now passing stats */}
+      {/* Row 3 – Streak + Productivity side by side.
+          FIX #4: CommitStreak is restored here. It and ProductivityInsights cover
+          different ground , Streak shows ring visualisations and lifetime totals;
+          Productivity shows day-of-week patterns and consistency score.
+          Subtitle updated from the generic tagline to something accurate. */}
       <div className="animate-fade-in-up" style={{ animationDelay: '0.15s' }}>
-        <SectionLabel emoji="⚡" title="Productivity Insights" subtitle="Data GitHub never shows you" />
-        <ProductivityInsights productivity={data.productivity} stats={data.stats} />
+        <SectionLabel emoji="⚡" title="Activity & Productivity" subtitle="Streaks, patterns and consistency" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <CommitStreak productivity={data.productivity} stats={data.stats} />
+          <ProductivityInsights productivity={data.productivity}  />
+        </div>
       </div>
 
       {/* Row 4 – Stars Over Time + Tech Transition */}

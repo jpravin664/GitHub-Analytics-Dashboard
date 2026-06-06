@@ -101,7 +101,7 @@ export default function Landing() {
           style={{ animationDelay: '0.3s' }}
         >
           Dive deep into your contribution patterns, language usage, star history,
-          and open source impact — all in one beautiful dashboard.
+          and open source impact , all in one beautiful dashboard.
         </p>
 
         {error && (
@@ -129,7 +129,7 @@ export default function Landing() {
           <FeatureCard
             icon="📊"
             title="Contribution Charts"
-            desc="Commit history, language distribution, and repo stars — all rendered as crisp interactive charts."
+            desc="Commit history, language distribution, and repo stars , all rendered as crisp interactive charts."
             delay="0.6s"
           />
           <FeatureCard

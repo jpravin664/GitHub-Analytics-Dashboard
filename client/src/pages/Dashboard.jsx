@@ -16,6 +16,12 @@ const SearchIcon = () => (
   </svg>
 );
 
+const InfoIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 flex-shrink-0">
+    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+  </svg>
+);
+
 function SkeletonBlock({ className }) {
   return <div className={`skeleton ${className}`} />;
 }
@@ -33,6 +39,81 @@ function LoadingState() {
         {[...Array(3)].map((_, i) => <SkeletonBlock key={i} className="h-64" />)}
       </div>
       <SkeletonBlock className="h-48" />
+    </div>
+  );
+}
+
+// ── Data scope disclaimer banner ──────────────────────────────────────────────
+// Each row: what the user sees on screen, where it comes from, how far back it goes.
+const DATA_SCOPE = [
+  {
+    icon: '✅',
+    label: 'Lifetime commits, stars, forks, language breakdown, repo count',
+    detail: 'All-time , pulled directly from every repository',
+  },
+  {
+    icon: '📅',
+    label: 'Monthly commit activity chart',
+    detail: 'Last 52 weeks , GitHub Stats API limit',
+  },
+  {
+    icon: '⚠️',
+    label: 'Streaks, day-of-week chart, weekly consistency',
+    detail: 'Recent ~300 events only , GitHub Events API hard cap',
+  },
+];
+
+function DataScopeDisclaimer() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="mb-6 rounded-xl border border-gh-accent/20 bg-gh-accent/5 overflow-hidden">
+      {/* Header row , always visible, click to expand */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left group"
+      >
+        <div className="flex items-center gap-2 text-gh-accent text-xs font-mono">
+          <InfoIcon />
+          <span>About this data , not everything shown is lifetime</span>
+        </div>
+        <span className={`text-gh-muted text-xs transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
+          ▾
+        </span>
+      </button>
+
+      {/* Expandable detail rows */}
+      {open && (
+        <div className="px-4 pb-4 space-y-2 border-t border-gh-accent/10">
+          <p className="text-gh-muted text-xs pt-3 mb-3">
+            GitHub's public API has different history limits per endpoint. Here's exactly what each section of this dashboard is based on:
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {DATA_SCOPE.map(({ icon, label, detail }) => (
+              <div
+                key={label}
+                className="flex flex-col gap-1 px-3 py-2.5 rounded-lg bg-gh-dark border border-gh-border"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm">{icon}</span>
+                  <span className={`text-xs font-mono font-semibold ${
+                    icon === '✅' ? 'text-gh-green'
+                    : icon === '📅' ? 'text-gh-orange'
+                    : 'text-gh-red'
+                  }`}>
+                    {icon === '✅' ? 'All time' : icon === '📅' ? 'Last 52 weeks' : 'Last ~300 events'}
+                  </span>
+                </div>
+                <p className="text-gh-text text-xs leading-relaxed">{label}</p>
+                <p className="text-gh-muted text-xs opacity-70">{detail}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-gh-muted text-xs pt-1 opacity-60">
+            This is a GitHub API constraint, not a limitation of this app. There is no public endpoint that provides historical events beyond the last ~300.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -206,6 +287,10 @@ export default function Dashboard() {
             <button onClick={fetchData} className="text-xs underline">Retry</button>
           </div>
         )}
+
+        {/* Data scope disclaimer , shown once data is loaded, not during skeleton */}
+        {!loading && data && <DataScopeDisclaimer />}
+
         {loading ? <LoadingState /> : data ? <DashboardContent data={data} /> : null}
       </main>
 

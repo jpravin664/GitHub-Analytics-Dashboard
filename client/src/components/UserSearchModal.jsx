@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import DashboardContent from './DashboardContent';
 
 const CloseIcon = () => (
@@ -29,6 +29,27 @@ function ModalLoadingState() {
 }
 
 export default function UserSearchModal({ query, data, loading, error, onClose, onRetry }) {
+  // FIX #7: Track an internal in-flight flag so rapid clicks on "Try Again"
+  // cannot fire multiple parallel API calls. The flag resets once the parent
+  // propagates loading=true (on the next render) or after a short safety timeout.
+  const [retrying, setRetrying] = useState(false);
+
+  const handleRetry = useCallback(() => {
+    if (retrying || loading) return;
+    setRetrying(true);
+    onRetry();
+    // Safety reset: if the parent never flips loading to true within 2 s,
+    // re-enable the button so the user isn't stuck.
+    setTimeout(() => setRetrying(false), 2000);
+  }, [retrying, loading, onRetry]);
+
+  // Once the parent reports loading, clear our local flag.
+  React.useEffect(() => {
+    if (loading) setRetrying(false);
+  }, [loading]);
+
+  const isRetryDisabled = retrying || loading;
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gh-dark/95 backdrop-blur-sm overflow-y-auto">
 
@@ -102,11 +123,25 @@ export default function UserSearchModal({ query, data, loading, error, onClose, 
               </p>
             </div>
             <div className="flex items-center gap-3">
+              {/* FIX #7: Button is disabled while a retry is in-flight to prevent
+                  multiple parallel API calls from rapid clicking. */}
               <button
-                onClick={onRetry}
-                className="px-4 py-2 rounded-lg bg-gh-accent text-white text-sm font-medium hover:bg-gh-accent/90 transition-colors"
+                onClick={handleRetry}
+                disabled={isRetryDisabled}
+                className={`px-4 py-2 rounded-lg text-white text-sm font-medium transition-colors
+                  ${isRetryDisabled
+                    ? 'bg-gh-accent/40 cursor-not-allowed'
+                    : 'bg-gh-accent hover:bg-gh-accent/90 cursor-pointer'
+                  }`}
               >
-                Try Again
+                {isRetryDisabled ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                    Retrying…
+                  </span>
+                ) : (
+                  'Try Again'
+                )}
               </button>
               <button
                 onClick={onClose}
@@ -118,7 +153,7 @@ export default function UserSearchModal({ query, data, loading, error, onClose, 
           </div>
         )}
 
-        {/* Success — full analytics */}
+        {/* Success , full analytics */}
         {!loading && !error && data && (
           <div className="space-y-6">
             {/* Info banner */}

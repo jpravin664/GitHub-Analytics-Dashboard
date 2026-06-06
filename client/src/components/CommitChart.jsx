@@ -1,8 +1,9 @@
 import React from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip,
+  XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Area, AreaChart
 } from 'recharts';
+// FIX #2: Removed unused LineChart and Line imports (dead code / bundle bloat).
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload?.length) {

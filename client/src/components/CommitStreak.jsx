@@ -1,6 +1,6 @@
 import React from 'react';
 
-// ── Ring component (now accepts unit prop) ───────────────────────────────────
+// ── Ring component ────────────────────────────────────────────────────────────
 const Ring = ({ value, max, color, emoji, label, sublabel, unit = 'days' }) => {
   const pct  = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   const r    = 38;
@@ -11,9 +11,7 @@ const Ring = ({ value, max, color, emoji, label, sublabel, unit = 'days' }) => {
     <div className="flex flex-col items-center gap-2">
       <div className="relative w-28 h-28">
         <svg viewBox="0 0 92 92" className="w-full h-full -rotate-90">
-          {/* Track */}
           <circle cx="46" cy="46" r={r} fill="none" stroke="#21262d" strokeWidth="7" />
-          {/* Progress */}
           <circle
             cx="46" cy="46" r={r} fill="none"
             stroke={color} strokeWidth="7"
@@ -55,26 +53,17 @@ const StreakRateMeter = ({ rate }) => {
       </div>
       <div className="flex items-center justify-between">
         <span className="text-xs" style={{ color }}>{label}</span>
-        <span className="text-gh-muted text-xs">current / best</span>
+        {/* Clarifies what the ratio means , current streak vs personal best */}
+        <span className="text-gh-muted text-xs">current / longest</span>
       </div>
     </div>
   );
 };
 
-// ── Stat tile ─────────────────────────────────────────────────────────────────
-const StatTile = ({ emoji, value, label, color, sub }) => (
-  <div className="bg-gh-dark rounded-xl p-4 border border-gh-border flex flex-col items-center text-center">
-    <span className="text-xl mb-1">{emoji}</span>
-    <span className="font-bold text-2xl leading-tight" style={{ color }}>{value}</span>
-    <span className="text-gh-muted text-xs mt-0.5">{label}</span>
-    {sub && <span className="text-gh-muted text-xs opacity-60 mt-0.5">{sub}</span>}
-  </div>
-);
-
-// ── Motivational message (updated for days) ───────────────────────────────────
+// ── Motivational message ──────────────────────────────────────────────────────
 const getMotivation = (current, longest, rate) => {
   if (current === 0 && longest === 0)
-    return { msg: "No streak data yet — refresh in 30s for GitHub to compute your stats!", color: 'text-gh-muted', icon: '⏳' };
+    return { msg: "No streak data yet , refresh in 30s for GitHub to compute your stats!", color: 'text-gh-muted', icon: '⏳' };
   if (current === 0)
     return { msg: `Your best was ${longest} days. Start a new streak today! 💪`, color: 'text-gh-accent', icon: '🎯' };
   if (current >= longest && longest > 0)
@@ -84,37 +73,34 @@ const getMotivation = (current, longest, rate) => {
   return { msg: `Keep going! You've been consistent for ${current} days.`, color: 'text-gh-accent', icon: '💡' };
 };
 
-// ── Main component (accepts stats prop) ───────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
+// FOCUSED ON: streak rings, streak rate, and motivational context.
+// Commit volume stats (total commits, avg/week, avg/day) live in ProductivityInsights.
 export default function CommitStreak({ productivity, stats }) {
   if (!productivity) return null;
 
   const {
-    currentStreak   = 0,
-    longestStreak   = 0,
-    streakRate      = 0,
+    currentStreak     = 0,
+    longestStreak     = 0,
+    streakRate        = 0,
     avgCommitsPerWeek = 0,
   } = productivity;
 
-  // Use lifetime commits from stats, fallback to productivity.totalCommits (recent)
   const totalLifetimeCommits = stats?.totalLifetimeCommits || productivity.totalCommits || 0;
 
   const { msg, color, icon } = getMotivation(currentStreak, longestStreak, streakRate);
   const maxRing = Math.max(longestStreak, 1);
 
-  // Commits per day estimate
-  const commitsPerDay = avgCommitsPerWeek > 0
-    ? (avgCommitsPerWeek / 7).toFixed(1)
-    : '0';
-
   return (
     <div className="bg-gh-card border border-gh-border rounded-xl p-5 flex flex-col gap-4">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-orange-400 text-lg">🔥</span>
           <div>
             <h3 className="text-gh-text font-semibold text-sm">Commit Streaks</h3>
-            <p className="text-gh-muted text-xs">GitHub removed this in 2016 — we brought it back</p>
+            <p className="text-gh-muted text-xs">GitHub removed this in 2016 , we brought it back</p>
           </div>
         </div>
         {streakRate > 0 && (
@@ -130,7 +116,7 @@ export default function CommitStreak({ productivity, stats }) {
         )}
       </div>
 
-      {/* Rings — now using unit="days" */}
+      {/* Streak rings */}
       <div className="flex justify-around items-center py-2">
         <Ring
           value={currentStreak}
@@ -160,29 +146,35 @@ export default function CommitStreak({ productivity, stats }) {
       {/* Streak rate meter */}
       {longestStreak > 0 && <StreakRateMeter rate={streakRate} />}
 
-      {/* Stat tiles — now using lifetime commits */}
-      <div className="grid grid-cols-3 gap-3">
-        <StatTile
-          emoji="📊"
-          value={totalLifetimeCommits > 0 ? totalLifetimeCommits.toLocaleString() : '—'}
-          label="Total Commits"
-          color="#bc8cff"
-          sub="all repositories"
-        />
-        <StatTile
-          emoji="📅"
-          value={avgCommitsPerWeek > 0 ? avgCommitsPerWeek : '—'}
-          label="Avg / Week"
-          color="#58a6ff"
-          sub="last 52 weeks"
-        />
-        <StatTile
-          emoji="⚡"
-          value={avgCommitsPerWeek > 0 ? commitsPerDay : '—'}
-          label="Avg / Day"
-          color="#3fb950"
-          sub="estimated"
-        />
+      {/* Quick-glance commit volume row , condensed single row, not 3 big tiles.
+          Full per-day/per-week breakdown is in ProductivityInsights. */}
+      <div className="grid grid-cols-3 divide-x divide-gh-border rounded-xl border border-gh-border overflow-hidden">
+        {[
+          {
+            emoji: '📊',
+            value: totalLifetimeCommits > 0 ? totalLifetimeCommits.toLocaleString() : '—',
+            label: 'Total commits',
+            color: '#bc8cff',
+          },
+          {
+            emoji: '📅',
+            value: avgCommitsPerWeek > 0 ? avgCommitsPerWeek : '—',
+            label: 'Avg / week',
+            color: '#58a6ff',
+          },
+          {
+            emoji: '⚡',
+            value: avgCommitsPerWeek > 0 ? (avgCommitsPerWeek / 7).toFixed(1) : '—',
+            label: 'Avg / day',
+            color: '#3fb950',
+          },
+        ].map(({ emoji, value, label, color }) => (
+          <div key={label} className="flex flex-col items-center py-3 px-2 bg-gh-dark text-center">
+            <span className="text-base mb-0.5">{emoji}</span>
+            <span className="font-bold text-base leading-tight" style={{ color }}>{value}</span>
+            <span className="text-gh-muted text-xs mt-0.5">{label}</span>
+          </div>
+        ))}
       </div>
 
       {/* Motivational message */}
@@ -190,6 +182,7 @@ export default function CommitStreak({ productivity, stats }) {
         <span className="flex-shrink-0 mt-0.5">{icon}</span>
         <span>{msg}</span>
       </div>
+
     </div>
   );
 }

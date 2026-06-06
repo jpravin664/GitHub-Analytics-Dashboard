@@ -5,12 +5,14 @@ const router = express.Router();
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
 
+// ── Auth middleware ───────────────────────────────────────────────────────────
 const requireAuth = (req, res, next) => {
   if (!req.session.accessToken || !req.session.user)
     return res.status(401).json({ error: 'Not authenticated' });
   next();
 };
 
+// ── GitHub API helpers ────────────────────────────────────────────────────────
 const githubRequest = async (url, token, params = {}) => {
   const response = await axios.get(url, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' },
@@ -31,7 +33,9 @@ const fetchAllPages = async (url, token, params = {}) => {
   return all;
 };
 
-// ISO week number helper (Monday-based)
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ── ISO week number (Monday-based) ───────────────────────────────────────────
 const getISOWeek = (date) => {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -41,29 +45,32 @@ const getISOWeek = (date) => {
   return `${d.getUTCFullYear()}-${String(weekNo).padStart(2, '0')}`;
 };
 
-// ── Events-based productivity (matches GitHub contribution graph) ──
+// ── Productivity from events ──────────────────────────────────────────────────
+// NOTE: GitHub Events API only returns the last ~300 events regardless of how
+// many pages you request , hard cap on their side. We stop at 3 pages (300 events).
+// This means streak/day-chart data only reflects recent activity, not lifetime.
+// Lifetime commit count comes from getRepoTotalCommits instead.
 const computeProductivityFromEvents = (events, login) => {
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const dayTotals = [0, 0, 0, 0, 0, 0, 0];
   const monthMap = {};
   let totalContributions = 0;
-  const contributionsPerDay = new Map(); // key: YYYY-MM-DD (UTC)
+  const contributionsPerDay = new Map();
 
-  if (!Array.isArray(events) || events.length === 0) {
-    return {
-      mostProductiveDay: 'N/A',
-      avgCommitsPerWeek: 0,
-      currentStreak: 0,
-      longestStreak: 0,
-      streakRate: 0,
-      dayChart: dayNames.map(n => ({ day: n.slice(0, 3), commits: 0 })),
-      totalCommits: 0,
-      monthMap: {},
-      weeklyCommits: [],
-    };
-  }
+  const emptyResult = {
+    mostProductiveDay: 'N/A',
+    avgCommitsPerWeek: 0,
+    currentStreak: 0,
+    longestStreak: 0,
+    streakRate: 0,
+    dayChart: dayNames.map(n => ({ day: n.slice(0, 3), commits: 0 })),
+    totalCommits: 0,
+    monthMap: {},
+    weeklyCommits: [],
+  };
 
-  // Filter events by the authenticated user
+  if (!Array.isArray(events) || events.length === 0) return emptyResult;
+
   const userEvents = events.filter(e => e.actor?.login?.toLowerCase() === login.toLowerCase());
 
   const getUTCDateKey = (date) => date.toISOString().split('T')[0];
@@ -72,38 +79,26 @@ const computeProductivityFromEvents = (events, login) => {
   let lastContributionDate = null;
 
   for (const event of userEvents) {
-    // Exclude events that never appear on GitHub's contribution graph
     const excludedTypes = ['WatchEvent', 'ForkEvent', 'MemberEvent', 'PullRequestReviewEvent', 'IssueCommentEvent'];
     if (excludedTypes.includes(event.type)) continue;
 
-    let weight = 0; // only count if action matches contribution rules
+    let weight = 0;
 
-    // ── PushEvent: count commits ──
     if (event.type === 'PushEvent') {
       const payload = event.payload || {};
       weight =
-        typeof payload.size === 'number' && payload.size > 0
-          ? payload.size
-          : typeof payload.distinct_size === 'number' && payload.distinct_size > 0
-          ? payload.distinct_size
-          : Array.isArray(payload.commits) && payload.commits.length > 0
-          ? payload.commits.length
-          : 1;
-    }
-    // ── IssuesEvent: only when an issue is opened ──
-    else if (event.type === 'IssuesEvent') {
-      const action = event.payload?.action;
-      if (action === 'opened') weight = 1;
-    }
-    // ── PullRequestEvent: opened or merged ──
-    else if (event.type === 'PullRequestEvent') {
+        typeof payload.size === 'number' && payload.size > 0 ? payload.size
+        : typeof payload.distinct_size === 'number' && payload.distinct_size > 0 ? payload.distinct_size
+        : Array.isArray(payload.commits) && payload.commits.length > 0 ? payload.commits.length
+        : 1;
+    } else if (event.type === 'IssuesEvent') {
+      if (event.payload?.action === 'opened') weight = 1;
+    } else if (event.type === 'PullRequestEvent') {
       const action = event.payload?.action;
       const pr = event.payload?.pull_request;
       if (action === 'opened') weight = 1;
       else if (action === 'closed' && pr?.merged === true) weight = 1;
     }
-    // Other event types are either excluded or not counted by GitHub (e.g., CreateEvent, DeleteEvent, etc.)
-    // We ignore them to match official contribution graph.
 
     if (weight === 0) continue;
 
@@ -111,9 +106,7 @@ const computeProductivityFromEvents = (events, login) => {
     const dateKey = getUTCDateKey(date);
     contributionsPerDay.set(dateKey, (contributionsPerDay.get(dateKey) || 0) + weight);
     totalContributions += weight;
-
-    const dayIndex = date.getUTCDay();
-    dayTotals[dayIndex] += weight;
+    dayTotals[date.getUTCDay()] += weight;
 
     const monthKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
     monthMap[monthKey] = (monthMap[monthKey] || 0) + weight;
@@ -123,29 +116,20 @@ const computeProductivityFromEvents = (events, login) => {
     if (!lastContributionDate || utcMidnight > lastContributionDate) lastContributionDate = utcMidnight;
   }
 
-  if (!firstContributionDate || contributionsPerDay.size === 0) {
-    return {
-      mostProductiveDay: 'N/A',
-      avgCommitsPerWeek: 0,
-      currentStreak: 0,
-      longestStreak: 0,
-      streakRate: 0,
-      dayChart: dayNames.map(n => ({ day: n.slice(0, 3), commits: 0 })),
-      totalCommits: 0,
-      monthMap: {},
-      weeklyCommits: [],
-    };
-  }
+  if (!firstContributionDate || contributionsPerDay.size === 0) return emptyResult;
 
-  // Build continuous date range from first contribution to today (UTC)
+  // Build continuous date range from first contribution to today
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
-  const endDate = new Date(Math.max(lastContributionDate, today));
+
+  // FIX: use .getTime() explicitly , Math.max(Date, Date) coerces to number
+  // by accident and works, but is misleading. Be explicit.
+  const endDate = new Date(Math.max(lastContributionDate.getTime(), today.getTime()));
+
   const allDays = [];
   let current = new Date(firstContributionDate);
   while (current <= endDate) {
-    const dateKey = current.toISOString().split('T')[0];
-    allDays.push(dateKey);
+    allDays.push(current.toISOString().split('T')[0]);
     current.setUTCDate(current.getUTCDate() + 1);
   }
 
@@ -160,9 +144,15 @@ const computeProductivityFromEvents = (events, login) => {
     }
   }
 
-  // Current streak (ending today)
+  // FIX: Current streak , if today has no commits yet, don't break the streak.
+  // Start from yesterday so a user who committed yesterday but not yet today
+  // doesn't see their streak reset to 0.
   let currentStreak = 0;
-  for (let i = allDays.length - 1; i >= 0; i--) {
+  const startIdx = (contributionsPerDay.get(allDays[allDays.length - 1]) || 0) > 0
+    ? allDays.length - 1   // today already has commits , include it
+    : allDays.length - 2;  // today is empty , start from yesterday
+
+  for (let i = startIdx; i >= 0; i--) {
     if ((contributionsPerDay.get(allDays[i]) || 0) > 0) {
       currentStreak++;
     } else {
@@ -172,11 +162,10 @@ const computeProductivityFromEvents = (events, login) => {
 
   // Weekly activity
   const weekMap = new Map();
-  for (const [dateKey, contribCount] of contributionsPerDay.entries()) {
+  for (const [dateKey, count] of contributionsPerDay.entries()) {
     const [year, month, day] = dateKey.split('-').map(Number);
-    const date = new Date(Date.UTC(year, month - 1, day));
-    const weekKey = getISOWeek(date);
-    weekMap.set(weekKey, (weekMap.get(weekKey) || 0) + contribCount);
+    const weekKey = getISOWeek(new Date(Date.UTC(year, month - 1, day)));
+    weekMap.set(weekKey, (weekMap.get(weekKey) || 0) + count);
   }
 
   const totalWeekContribs = Array.from(weekMap.values()).reduce((s, v) => s + v, 0);
@@ -210,11 +199,11 @@ const computeProductivityFromEvents = (events, login) => {
   };
 };
 
-// ── Stars over time (exclude forks) ──
+// ── Stars over time (own repos only) ─────────────────────────────────────────
 const buildStarsOverTime = (repos) => {
   let running = 0;
-  const nonForks = repos.filter(r => !r.fork);
-  return [...nonForks]
+  return [...repos]
+    .filter(r => !r.fork)
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
     .filter(r => r.stargazers_count > 0)
     .map(r => {
@@ -228,11 +217,10 @@ const buildStarsOverTime = (repos) => {
     });
 };
 
-// ── Tech stack transition (exclude forks) ──
+// ── Tech stack transition (own repos only) ────────────────────────────────────
 const buildTechTransition = (repos) => {
   const yearMap = {};
-  const nonForks = repos.filter(r => !r.fork);
-  nonForks.forEach(repo => {
+  repos.filter(r => !r.fork).forEach(repo => {
     if (!repo.language) return;
     const year = new Date(repo.created_at).getFullYear();
     if (!yearMap[year]) yearMap[year] = {};
@@ -251,23 +239,23 @@ const buildTechTransition = (repos) => {
     });
 };
 
-// ── Fetch all pages for search (issues/PRs) ──
+// ── Search API pagination (GitHub caps at 1000 results / 10 pages) ────────────
 const fetchAllSearchPages = async (url, token, params) => {
-  let page = 1;
-  let all = [];
+  let page = 1, all = [];
   while (true) {
     const data = await githubRequest(url, token, { ...params, per_page: 100, page });
     if (!data.items || data.items.length === 0) break;
     all = all.concat(data.items);
     if (data.items.length < 100) break;
     page++;
-    // GitHub Search API max 1000 results; stop at 10 pages (1000 items)
-    if (page > 10) break;
+    if (page > 10) break; // GitHub Search API hard limit: 1000 results
   }
   return { items: all };
 };
 
-// ── Accurate commit counter using HEAD + Link header (default branch only) ──
+// ── Accurate lifetime commit count via HEAD + Link header ─────────────────────
+// FIX: regex changed from /&page=(\d+)>/ to /[?&]page=(\d+)>/ so it matches
+// when `page` is the first query param (no leading &).
 const getRepoTotalCommits = async (owner, repo, token) => {
   try {
     const url = `https://api.github.com/repos/${owner}/${repo}/commits`;
@@ -276,100 +264,27 @@ const getRepoTotalCommits = async (owner, repo, token) => {
       params: { per_page: 1 }
     });
     const linkHeader = headResponse.headers.link || '';
-    const lastPageMatch = linkHeader.match(/&page=(\d+)>; rel="last"/);
-    if (lastPageMatch && lastPageMatch[1]) {
-      return parseInt(lastPageMatch[1], 10);
-    }
-    // Only one page (≤100 commits)
+    // FIX: use [?&] so the regex matches whether page= is first or subsequent param
+    const lastPageMatch = linkHeader.match(/[?&]page=(\d+)>; rel="last"/);
+    if (lastPageMatch) return parseInt(lastPageMatch[1], 10);
+
+    // Repo has ≤ 100 commits , count the actual array length
+    // FIX: empty repos return HTTP 409 (not 404); catch handles this already
     const firstPage = await axios.get(url, {
       headers: { Authorization: `Bearer ${token}` },
       params: { per_page: 100, page: 1 }
     });
     return firstPage.data.length;
   } catch (err) {
+    // 409 = empty repo, 404 = gone , both are fine to return 0 for
+    if (err.response?.status === 409 || err.response?.status === 404) return 0;
     console.error(`Commit count error for ${owner}/${repo}:`, err.message);
     return 0;
   }
 };
 
-// Helper to delay between batches (avoid rate limiting)
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// ── MAIN buildDashboardData (optimized, accurate streaks, excludes forks) ──
-const buildDashboardData = async (token, username, isOwnProfile = true) => {
-  const profileUrl = isOwnProfile
-    ? 'https://api.github.com/user'
-    : `https://api.github.com/users/${username}`;
-  const reposUrl = isOwnProfile
-    ? 'https://api.github.com/user/repos'
-    : `https://api.github.com/users/${username}/repos`;
-  const repoParams = isOwnProfile
-    ? { type: 'owner', sort: 'updated' }
-    : { type: 'public', sort: 'updated' };
-
-  const [profile, repos] = await Promise.all([
-    githubRequest(profileUrl, token),
-    fetchAllPages(reposUrl, token, repoParams)
-  ]);
-
-  const login = profile.login;
-
-  // ---- Exclude forks from all metrics that represent user's own work ----
-  const ownRepos = repos.filter(r => !r.fork);
-
-  // ----- Lifetime total commits (default branch only, batched with delays) -----
-  let totalLifetimeCommits = 0;
-  const batchSize = 5;   // Reduced from 20 to avoid rate limits
-  for (let i = 0; i < ownRepos.length; i += batchSize) {
-    const batch = ownRepos.slice(i, i + batchSize);
-    const commitCounts = await Promise.all(
-      batch.map(repo => getRepoTotalCommits(repo.owner.login, repo.name, token))
-    );
-    totalLifetimeCommits += commitCounts.reduce((a, b) => a + b, 0);
-    if (i + batchSize < ownRepos.length) await delay(200); // small delay between batches
-  }
-
-  // Language distribution (only own repos)
-  const languageMap = {};
-  ownRepos.forEach(r => {
-    if (r.language) languageMap[r.language] = (languageMap[r.language] || 0) + 1;
-  });
-  const languages = Object.entries(languageMap)
-    .sort((a, b) => b[1] - a[1])
-    .map(([name, value]) => ({ name, value }));
-
-  // Top repos by stars (only own repos)
-  const topReposByStars = [...ownRepos]
-    .sort((a, b) => b.stargazers_count - a.stargazers_count)
-    .slice(0, 5)
-    .map(r => ({ name: r.name, stars: r.stargazers_count, forks: r.forks_count }));
-
-  const totalStars = ownRepos.reduce((s, r) => s + r.stargazers_count, 0);
-  const totalForks = ownRepos.reduce((s, r) => s + r.forks_count, 0);
-  const mostUsedLanguage = languages[0]?.name || 'N/A';
-  const accountAge = ((new Date() - new Date(profile.created_at)) / (1000 * 60 * 60 * 24 * 365)).toFixed(1);
-
-  // ----- Fetch all user events (no hard page limit, stop when data incomplete) -----
-  const eventsUrl = `https://api.github.com/users/${login}/events`;
-  let allEvents = [];
-  try {
-    let page = 1;
-    while (page <= 100) { // Increased max pages, but will break when no data
-      const eventsPage = await githubRequest(eventsUrl, token, { per_page: 100, page });
-      if (!Array.isArray(eventsPage) || eventsPage.length === 0) break;
-      allEvents = allEvents.concat(eventsPage);
-      if (eventsPage.length < 100) break;
-      page++;
-    }
-  } catch (evErr) {
-    console.error('Events fetch error:', evErr.message);
-  }
-
-  const productivityRaw = computeProductivityFromEvents(allEvents, login);
-  // We do NOT use monthMap from productivity; commitActivity will be based only on repo stats
-  const { monthMap: _ignoredMonthMap, ...productivityClean } = productivityRaw;
-
-  // ----- Commit activity for monthly chart (only own repos, 5 most popular) -----
+// ── Commit activity: last 12 months across top 5 repos ───────────────────────
+const buildCommitActivity = async (ownRepos, login, token) => {
   const activeRepos = [...ownRepos]
     .sort((a, b) => b.stargazers_count - a.stargazers_count)
     .slice(0, 5);
@@ -380,12 +295,11 @@ const buildDashboardData = async (token, username, isOwnProfile = true) => {
     )
   );
 
-  // Pure commit activity – no mixing with events
   const monthlyCommits = {};
   commitStats.forEach(result => {
     if (result.status === 'fulfilled' && Array.isArray(result.value)) {
       result.value.forEach(week => {
-        if (!week || !week.total) return;
+        if (!week?.total) return;
         const date = new Date(week.week * 1000);
         const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
         monthlyCommits[key] = (monthlyCommits[key] || 0) + week.total;
@@ -403,8 +317,11 @@ const buildDashboardData = async (token, username, isOwnProfile = true) => {
       commits: monthlyCommits[key] || 0
     });
   }
+  return last12Months;
+};
 
-  // ----- Contributions (full pagination with search limit warning) -----
+// ── Open-source contribution data ─────────────────────────────────────────────
+const buildContributions = async (login, token) => {
   const [mergedPRsRes, issuesRes] = await Promise.allSettled([
     fetchAllSearchPages('https://api.github.com/search/issues', token, {
       q: `author:${login} type:pr is:merged is:public`
@@ -415,64 +332,148 @@ const buildDashboardData = async (token, username, isOwnProfile = true) => {
   ]);
 
   const mergedPRs = mergedPRsRes.status === 'fulfilled' ? mergedPRsRes.value : { items: [] };
-  const issues = issuesRes.status === 'fulfilled' ? issuesRes.value : { items: [] };
+  const issues    = issuesRes.status   === 'fulfilled' ? issuesRes.value   : { items: [] };
 
-  const externalPRs = (mergedPRs.items || []).filter(pr => {
-    const owner = pr.repository_url?.split('/').slice(-2, -1)[0];
+  const isExternal = (item) => {
+    const owner = item.repository_url?.split('/').slice(-2, -1)[0];
     return owner && owner.toLowerCase() !== login.toLowerCase();
-  });
-  const externalIssues = (issues.items || []).filter(issue => {
-    const owner = issue.repository_url?.split('/').slice(-2, -1)[0];
-    return owner && owner.toLowerCase() !== login.toLowerCase();
-  });
+  };
+
+  const externalPRs    = (mergedPRs.items || []).filter(isExternal);
+  const externalIssues = (issues.items    || []).filter(isExternal);
 
   const contribRepoMap = {};
   externalPRs.forEach(pr => {
     const rn = pr.repository_url?.split('/').slice(-2).join('/');
-    if (rn && !contribRepoMap[rn])
-      contribRepoMap[rn] = { name: rn, url: `https://github.com/${rn}`, prCount: 0 };
-    if (rn) contribRepoMap[rn].prCount++;
+    if (!rn) return;
+    if (!contribRepoMap[rn]) contribRepoMap[rn] = { name: rn, url: `https://github.com/${rn}`, prCount: 0 };
+    contribRepoMap[rn].prCount++;
   });
 
   return {
+    totalMergedPRs: externalPRs.length,
+    totalIssuesOpened: externalIssues.length,
+    contributedRepos: Object.values(contribRepoMap)
+      .sort((a, b) => b.prCount - a.prCount)
+      .slice(0, 10)
+  };
+};
+
+// ── MAIN buildDashboardData ───────────────────────────────────────────────────
+const buildDashboardData = async (token, username, isOwnProfile = true) => {
+  const profileUrl = isOwnProfile ? 'https://api.github.com/user' : `https://api.github.com/users/${username}`;
+  const reposUrl   = isOwnProfile ? 'https://api.github.com/user/repos' : `https://api.github.com/users/${username}/repos`;
+  const repoParams = isOwnProfile ? { type: 'owner', sort: 'updated' } : { type: 'public', sort: 'updated' };
+
+  // Step 1: profile + all repos in parallel
+  const [profile, repos] = await Promise.all([
+    githubRequest(profileUrl, token),
+    fetchAllPages(reposUrl, token, repoParams)
+  ]);
+
+  const login    = profile.login;
+  const ownRepos = repos.filter(r => !r.fork);
+
+  // Step 2: lifetime commit count , batched to avoid rate limits.
+  // This is the only source of truth for totalLifetimeCommits.
+  // Events API only covers ~last 300 events so we don't use it for this.
+  let totalLifetimeCommits = 0;
+  const batchSize = 5;
+  for (let i = 0; i < ownRepos.length; i += batchSize) {
+    const batch = ownRepos.slice(i, i + batchSize);
+    const counts = await Promise.all(
+      batch.map(r => getRepoTotalCommits(r.owner.login, r.name, token))
+    );
+    totalLifetimeCommits += counts.reduce((a, b) => a + b, 0);
+    if (i + batchSize < ownRepos.length) await delay(200);
+  }
+
+  // Step 3: derived stats from repo list (no extra API calls needed)
+  const languageMap = {};
+  ownRepos.forEach(r => {
+    if (r.language) languageMap[r.language] = (languageMap[r.language] || 0) + 1;
+  });
+  const languages = Object.entries(languageMap)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, value]) => ({ name, value }));
+
+  const topReposByStars = [...ownRepos]
+    .sort((a, b) => b.stargazers_count - a.stargazers_count)
+    .slice(0, 5)
+    .map(r => ({ name: r.name, stars: r.stargazers_count, forks: r.forks_count }));
+
+  const totalStars       = ownRepos.reduce((s, r) => s + r.stargazers_count, 0);
+  const totalForks       = ownRepos.reduce((s, r) => s + r.forks_count, 0);
+  const mostUsedLanguage = languages[0]?.name || 'N/A';
+  const accountAge       = ((new Date() - new Date(profile.created_at)) / (1000 * 60 * 60 * 24 * 365)).toFixed(1);
+
+  // Step 4: Events , FIX: GitHub hard-caps at 300 events (3 pages of 100).
+  // The old code looped to page 100, firing 97 empty requests. Stop at 3.
+  const eventsUrl = `https://api.github.com/users/${login}/events`;
+  let allEvents = [];
+  try {
+    for (let page = 1; page <= 3; page++) {
+      const eventsPage = await githubRequest(eventsUrl, token, { per_page: 100, page });
+      if (!Array.isArray(eventsPage) || eventsPage.length === 0) break;
+      allEvents = allEvents.concat(eventsPage);
+      if (eventsPage.length < 100) break;
+    }
+  } catch (evErr) {
+    console.error('Events fetch error:', evErr.message);
+  }
+
+  const productivityRaw = computeProductivityFromEvents(allEvents, login);
+  const { monthMap: _unused, ...productivity } = productivityRaw;
+
+  // Step 5: remaining async work in parallel
+  const [commitActivity, contributions] = await Promise.all([
+    buildCommitActivity(ownRepos, login, token),
+    buildContributions(login, token)
+  ]);
+
+  return {
     profile: {
-      login, name: profile.name, bio: profile.bio,
-      avatar_url: profile.avatar_url, html_url: profile.html_url,
-      followers: profile.followers, following: profile.following,
-      public_repos: profile.public_repos, created_at: profile.created_at
+      login,
+      name:         profile.name,
+      bio:          profile.bio,
+      avatar_url:   profile.avatar_url,
+      html_url:     profile.html_url,
+      followers:    profile.followers,
+      following:    profile.following,
+      public_repos: profile.public_repos,
+      created_at:   profile.created_at
     },
     stats: {
       totalStars,
       totalForks,
       mostUsedLanguage,
       accountAge,
-      totalRepos: ownRepos.length,   // show only own repos count
-      totalLifetimeCommits
+      totalRepos: ownRepos.length,
+      totalLifetimeCommits  // lifetime across ALL own repos, from commit counter
     },
     languages,
     topReposByStars,
-    commitActivity: last12Months,
-    productivity: productivityClean,
-    starsOverTime: buildStarsOverTime(repos),        // uses ownRepos internally
-    techTransition: buildTechTransition(repos),      // uses ownRepos internally
-    contributions: {
-      totalMergedPRs: externalPRs.length,
-      totalIssuesOpened: externalIssues.length,
-      contributedRepos: Object.values(contribRepoMap)
-        .sort((a, b) => b.prCount - a.prCount)
-        .slice(0, 10)
-    }
+    commitActivity,          // last 12 months, top 5 repos
+    productivity,            // day chart, streaks, consistency , from recent events
+    starsOverTime:   buildStarsOverTime(repos),
+    techTransition:  buildTechTransition(repos),
+    contributions
   };
 };
 
 // ── Routes ────────────────────────────────────────────────────────────────────
+
 router.get('/dashboard', requireAuth, async (req, res) => {
   const { login: username } = req.session.user;
   const token = req.session.accessToken;
+  // FIX: store the first Cache.findOne result so the error fallback reuses it
+  // instead of making a second DB round-trip.
+  let cachedDoc = null;
   try {
-    const cached = await Cache.findOne({ username });
-    if (cached && Date.now() - cached.cachedAt.getTime() < CACHE_TTL_MS)
-      return res.json({ ...cached.data, _source: 'cached', _cachedAt: cached.cachedAt });
+    cachedDoc = await Cache.findOne({ username });
+    if (cachedDoc && Date.now() - cachedDoc.cachedAt.getTime() < CACHE_TTL_MS)
+      return res.json({ ...cachedDoc.data, _source: 'cached', _cachedAt: cachedDoc.cachedAt });
+
     const data = await buildDashboardData(token, username, true);
     await Cache.findOneAndUpdate(
       { username },
@@ -482,10 +483,9 @@ router.get('/dashboard', requireAuth, async (req, res) => {
     res.json({ ...data, _source: 'live' });
   } catch (err) {
     console.error('Dashboard error:', err.message, err.stack);
-    try {
-      const stale = await Cache.findOne({ username });
-      if (stale) return res.json({ ...stale.data, _source: 'cached', _cachedAt: stale.cachedAt, _stale: true });
-    } catch (_) { }
+    // Serve stale cache if available , use the doc we already fetched
+    const stale = cachedDoc || await Cache.findOne({ username }).catch(() => null);
+    if (stale) return res.json({ ...stale.data, _source: 'cached', _cachedAt: stale.cachedAt, _stale: true });
     res.status(500).json({ error: 'Failed to fetch GitHub data', details: err.message });
   }
 });
@@ -511,14 +511,19 @@ router.post('/refresh', requireAuth, async (req, res) => {
 router.get('/user/:username', requireAuth, async (req, res) => {
   const clean = req.params.username.trim();
   const token = req.session.accessToken;
-  // FIX: allow dots in usernames
-  if (!clean || !/^[a-zA-Z0-9.-]+$/.test(clean))
+  // FIX: tightened regex , GitHub usernames are 1–39 alphanumeric or hyphen,
+  // cannot start/end with hyphen, no consecutive hyphens, no dots.
+  if (!clean || !/^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/.test(clean))
     return res.status(400).json({ error: 'Invalid GitHub username' });
+
   const cacheKey = `search:${clean.toLowerCase()}`;
+  let cachedDoc = null;
   try {
-    const cached = await Cache.findOne({ username: cacheKey });
-    if (cached && Date.now() - cached.cachedAt.getTime() < CACHE_TTL_MS)
-      return res.json({ ...cached.data, _source: 'cached', _cachedAt: cached.cachedAt });
+    cachedDoc = await Cache.findOne({ username: cacheKey });
+    if (cachedDoc && Date.now() - cachedDoc.cachedAt.getTime() < CACHE_TTL_MS)
+      return res.json({ ...cachedDoc.data, _source: 'cached', _cachedAt: cachedDoc.cachedAt });
+
+    // Verify user exists before running the full expensive build
     try {
       await githubRequest(`https://api.github.com/users/${clean}`, token);
     } catch (err) {
@@ -526,6 +531,7 @@ router.get('/user/:username', requireAuth, async (req, res) => {
         return res.status(404).json({ error: `GitHub user "${clean}" not found` });
       throw err;
     }
+
     const data = await buildDashboardData(token, clean, false);
     await Cache.findOneAndUpdate(
       { username: cacheKey },
@@ -535,11 +541,13 @@ router.get('/user/:username', requireAuth, async (req, res) => {
     res.json({ ...data, _source: 'live' });
   } catch (err) {
     console.error(`Search error for ${clean}:`, err.message);
+    const stale = cachedDoc || await Cache.findOne({ username: cacheKey }).catch(() => null);
+    if (stale) return res.json({ ...stale.data, _source: 'cached', _cachedAt: stale.cachedAt, _stale: true });
     res.status(500).json({ error: 'Failed to fetch user data', details: err.message });
   }
 });
 
-// ── Debug route (unchanged) ──
+// ── Debug route ───────────────────────────────────────────────────────────────
 router.get('/debug/events', requireAuth, async (req, res) => {
   const { login } = req.session.user;
   const token = req.session.accessToken;
@@ -550,7 +558,8 @@ router.get('/debug/events', requireAuth, async (req, res) => {
     );
     const pushEvents = events.filter(e => e.type === 'PushEvent');
     res.json({
-      login, totalEvents: events.length,
+      login,
+      totalEvents: events.length,
       pushEventCount: pushEvents.length,
       samplePayload: pushEvents[0]?.payload || null,
       sizes: pushEvents.map(e => ({

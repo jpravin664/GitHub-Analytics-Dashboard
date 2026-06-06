@@ -5,7 +5,7 @@ const EmptyState = () => (
     <div className="text-5xl mb-4">🌱</div>
     <h4 className="text-gh-text font-semibold mb-2">No external contributions yet</h4>
     <p className="text-gh-muted text-sm max-w-sm">
-      Start contributing to open source! — find a project you love, open an issue or submit a PR.
+      Start contributing to open source! , find a project you love, open an issue or submit a PR.
     </p>
     <a
       href="https://github.com/explore"

@@ -39,7 +39,7 @@ export default function TechTransition({ techTransition }) {
         <span className="text-lg">🔄</span>
         <div>
           <h3 className="text-gh-text font-semibold text-sm">Tech Stack Evolution</h3>
-          <p className="text-gh-muted text-xs">Your technical growth story — year by year</p>
+          <p className="text-gh-muted text-xs">Your technical growth story , year by year</p>
         </div>
       </div>
 
@@ -129,7 +129,7 @@ export default function TechTransition({ techTransition }) {
               by {techTransition[techTransition.length-1].year}
             </>
           ) : (
-            <> — consistent {techTransition[0].topLang} focus throughout</>
+            <> , consistent {techTransition[0].topLang} focus throughout</>
           )}
         </div>
       )}
